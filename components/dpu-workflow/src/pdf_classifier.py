@@ -83,7 +83,7 @@ def is_form(
     document = result.document
 
     for entity in document.entities:
-        if entity.type == 'Form' and float(entity.confidence) > 0.7:
+        if entity.type.lower() == 'form' and float(entity.confidence) > 0.7:
             return True
 
     return False

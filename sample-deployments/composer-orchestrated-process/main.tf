@@ -106,6 +106,7 @@ module "dpu_workflow" {
     DPU_DATA_STORE_REGION  = var.vertex_ai_data_store_region
     DOC_PROCESSOR_JOB_NAME = module.processor.cloud_run_job_name
     DPU_DATA_STORE_ID      = google_discovery_engine_data_store.dpu_ds.data_store_id
+    FORMS_PARSER_JOB_NAME  = module.form_parser_processor.cloud_run_job_name
   }
 }
 

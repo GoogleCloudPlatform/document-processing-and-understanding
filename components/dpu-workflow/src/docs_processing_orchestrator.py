@@ -188,22 +188,27 @@ def generate_pdf_forms_list(**context):
     storage_client = storage.Client()
     bucket = storage_client.bucket(process_bucket)
 
-    if project_id.strip() == "" or location.strip() == "" or processor_id.strip() == "":
+    if (processor_id is None or
+            project_id.strip() == "" or
+            location is None or
+            location.strip() == "" or
+            processor_id is None or
+            processor_id.strip() == ""):
         return pdf_forms_list
 
     blobs = bucket.list_blobs(prefix=process_folder+"/pdf/")
     for blob in blobs:
         if process_bucket is not None:
             if pdf_classifier.is_form(project_id=project_id,
-                        location=location,
-                        processor_id=processor_id,
-                        file_storage_bucket=process_bucket,
-                        file_path=blob.name,
-                        mime_type="application/pdf"):
+                                      location=location,
+                                      processor_id=processor_id,
+                                      file_storage_bucket=process_bucket,
+                                      file_path=blob.name,
+                                      mime_type="application/pdf"):
                 pdf_form = {
-                    "source_object": f"{blob.name}",
+                    "source_object": blob.name,
                     "destination_bucket": process_bucket,
-                    "destination_object": f"{process_folder}/pdf-forms/"
+                    "destination_object": f"{process_folder}/pdf-forms/input/"
                 }
                 pdf_forms_list.append(pdf_form)
 
@@ -312,6 +317,18 @@ with DAG(
         move_object=True,
     ).expand_kwargs(generate_pdf_forms_l.output)
 
+    execute_forms_parser = CloudRunExecuteJobOperator(
+        project_id=os.environ.get("GCP_PROJECT"),
+        region=os.environ.get("DPU_REGION"),
+        task_id="execute_forms_parser",
+        job_name=os.environ.get("FORMS_PARSER_JOB_NAME"),
+        deferrable=False,
+        overrides={
+            "task_count": 1,
+            "timeout": "300s",
+        }
+    )
+
     create_output_table_name = PythonOperator(
         task_id="create_output_table_name",
         python_callable=generete_output_table_name,
@@ -370,6 +387,7 @@ with DAG(
         >> move_to_processing
         >> generate_pdf_forms_l
         >> move_forms
+        >> execute_forms_parser
         >> create_output_table_name
         >> create_output_table
         >> create_process_job_params
