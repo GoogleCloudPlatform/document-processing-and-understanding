@@ -27,12 +27,9 @@ DIVIDER=$(printf %"$(tput cols)"s | tr " " "*")
 DIVIDER+="\n"
 
 # DECLARE VARIABLES
-declare -a apis_array=("cloudresourcemanager.googleapis.com"
-                "serviceusage.googleapis.com"
-                "iam.googleapis.com"
-                "compute.googleapis.com"
-                "orgpolicy.googleapis.com"
-                )
+mapfile -t roles_array < project_apis.txt
+mapfile -t roles_array < project_roles.txt
+
 
 # DISPLAY HELPERS
 
@@ -85,7 +82,7 @@ check_environment_variable() {
 }
 
 # shell script function to check if api is enabled
-check_apis_enabled(){
+check_api_enabled(){
     local __api_endpoint=$1
     COUNTER=0
     MAX_TRIES=100
@@ -108,6 +105,7 @@ check_apis_enabled(){
 check_and_set_policy_rule(){
   local _policy_name=$1 _rule_pattern=$2 _rule_set_pattern=$3 _project_id=$4
   echo "policy: ${_policy_name}"
+  ## TODO: this only checks if a policy is set at the project, and ignores inherited policies. Use policy analyzer instead to check for effective policy enforcement https://cloud.google.com/policy-intelligence/docs/analyze-organization-policies#analyze_assets
   if ! gcloud org-policies describe $_policy_name --project="${PROJECT_ID}" | grep -i "${_rule_pattern}" ; then
     if ! set_policy_rule "${_policy_name}" "${_rule_set_pattern}" "${_project_id}" ; then
       echo "Org policy: '${_policy_name}' with rule: '${_rule_pattern}' cannot be set but is required, Contact your org-admin to set the policy before continue with deployment"
@@ -140,10 +138,10 @@ set_policy_rule(){
 }
 
 # shell script function to enable api
-enable_apis(){
+enable_api(){
     local __api_endpoint=$1
     gcloud services enable $__api_endpoint
-    check_apis_enabled $__api_endpoint
+    check_api_enabled $__api_endpoint
     unset __api_endpoint
 }
 
@@ -152,7 +150,38 @@ enable_all_apis () {
     ## now loop through the above array
     for i in "${apis_array[@]}"
     do
-        enable_apis "$i"
+      enable_api "$i"
     done
 }
 
+# shell script function to enable IAM roles
+enable_role(){
+    local __role=$1
+    gcloud projects add-iam-policy-binding $PROJECT_ID --role=$1 --member=$__principal
+    unset __role
+}
+
+# enable all roles in the roles array for service account used to deploy terraform resources
+enable_deployer_roles () {
+    local __principal=serviceAccount:$1
+    ## now loop through the above array
+    for i in "${roles_array[@]}"
+    do
+        enable_role "$i" "serviceAccount:$__principal"
+    done
+    unset __principal
+}
+
+# enable a specific set of roles for the default Compute SA implicitly used by Cloud Build.
+# Behavior has changed since 2024 so that legacy Cloud Build SA no longer has permissions by default: https://cloud.google.com/build/docs/cloud-build-service-account-updates
+enable_builder_roles () {
+    local __PROJECTNUM=$(gcloud projects describe $PROJECT_ID --format="get(projectNumber)")
+    local __principal=serviceAccount:"$__PROJECTNUM-compute@developer.gserviceaccount.com"
+    ## necessary permissions for building AR
+    for i in "roles/logging.logWriter" "roles/storage.objectUser" "roles/artifactregistry.createOnPushWriter"
+    do
+        enable_role "$i" "serviceAccount:$__principal"
+    done
+    unset __principal
+    unset __PROJECTNUM
+}
